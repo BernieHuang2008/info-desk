@@ -357,6 +357,11 @@
             previousData = oldData;
             currentData = newData; // Update local state
             
+            // attach meta info
+            newData["_meta.id"] = currentId; // Ensure ID is included
+            newData["_meta.lastModified"] = new Date().toISOString();
+            newData["_meta.category"] = newData["meta.category"] || "general";
+
             try {
                 const res = await fetch(`/info/${currentId}`, {
                     method: 'POST',
