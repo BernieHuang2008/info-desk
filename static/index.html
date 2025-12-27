@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Info Desk</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            padding: 20px;
+            max-width: 800px;
+            margin: 0 auto;
+            background-color: #f5f5f5;
+        }
+        h1 { font-size: 1.5rem; margin-bottom: 1rem; }
+        
+        .group {
+            background: white;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            margin-bottom: 10px;
+            overflow: hidden;
+        }
+        
+        summary {
+            padding: 10px 15px;
+            background-color: #eee;
+            cursor: pointer;
+            font-weight: bold;
+            user-select: none;
+        }
+        
+        summary:hover { background-color: #e0e0e0; }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.9rem;
+        }
+        
+        td, th {
+            padding: 8px 15px;
+            border-bottom: 1px solid #eee;
+            text-align: left;
+        }
+        
+        tr:last-child td { border-bottom: none; }
+        
+        .col-key { width: 40%; font-weight: 500; color: #333; }
+        .col-val { width: 40%; color: #555; }
+        .col-act { width: 20%; text-align: right; }
+        
+        button {
+            cursor: pointer;
+            padding: 4px 8px;
+            border: 1px solid #ccc;
+            background: transparent;
+            border-radius: 3px;
+            font-size: 0.8rem;
+        }
+
+        .delete-btn {
+            color: #ff4d4d;
+            border: none;
+            font-weight: bold;
+        }
+        
+        button:hover { background: #f0f0f0; }
+        
+        input {
+            width: 95%;
+            padding: 4px;
+            border: 1px solid #ccc;
+            border-radius: 3px;
+        }
+
+        .snackbar {
+            visibility: hidden;
+            min-width: 250px;
+            background-color: #333;
+            color: #fff;
+            text-align: center;
+            border-radius: 4px;
+            padding: 16px;
+            position: fixed;
+            z-index: 1;
+            left: 50%;
+            top: 30px;
+            transform: translateX(-50%);
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .snackbar.show {
+            visibility: visible;
+            animation: fadein 0.5s, fadeout 0.5s 4.5s;
+        }
+        
+        /* Keep it visible if we want to allow interaction for a while, 
+           but user asked for "pop a snapbar", usually implies transient. 
+           However, "revoke" button needs to be clickable. 
+           I'll make it stay for 5 seconds or until clicked. */
+        
+        .snackbar button {
+            color: #4CAF50;
+            border: none;
+        }
+
+        .add-btn-container {
+            margin-top: 20px;
+            text-align: center;
+        }
+        
+        .add-btn {
+            padding: 8px 16px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            font-size: 1rem;
+        }
+        .add-btn:hover { background-color: #0056b3; }
+
+    </style>
+</head>
+<body>
+
+    <h1 id="page-title">Info Display</h1>
+    
+    <div class="add-btn-container" style="margin-bottom: 20px; text-align: left;">
+        <button class="add-btn" onclick="addNewField()">+ Add New Field</button>
+    </div>
+
+    <div id="content">Loading...</div>
+
+    <div id="snackbar" class="snackbar">
+        <span id="snack-msg">Updated successfully</span>
+        <button onclick="revokeChanges()">Revoke</button>
+    </div>
+
+    <script>
+        let currentId = null;
+        let currentData = {};
+        let previousData = null; // For revoke
+        let snackbarTimeout;
+
+        // Helper: Flatten object to dot notation
+        function flatten(data) {
+            const result = {};
+            function recurse(cur, prop) {
+                if (Object(cur) !== cur) {
+                    result[prop] = cur;
+                } else if (Array.isArray(cur)) {
+                     for(let i=0, l=cur.length; i<l; i++)
+                         recurse(cur[i], prop ? prop+"."+i : ""+i);
+                    if (cur.length == 0)
+                        result[prop] = [];
+                } else {
+                    let isEmpty = true;
+                    for (const p in cur) {
+                        isEmpty = false;
+                        recurse(cur[p], prop ? prop + "." + p : p);
+                    }
+                    if (isEmpty && prop)
+                        result[prop] = {};
+                }
+            }
+            recurse(data, "");
+            return result;
+        }
+
+        // Helper: Get ID from URL
+        function getId() {
+            const params = new URLSearchParams(window.location.search);
+            return params.get('id');
+        }
+
+        async function init() {
+            currentId = getId();
+            if (!currentId) {
+                document.getElementById('content').innerText = "No ID provided in URL (?id=xxx)";
+                return;
+            }
+            document.getElementById('page-title').innerText = `Info: ${currentId}`;
+            
+            try {
+                const res = await fetch(`/info/${currentId}`);
+                if (!res.ok) throw new Error('Failed to fetch info');
+                const json = await res.json();
+                currentData = flatten(json);
+                render();
+            } catch (e) {
+                document.getElementById('content').innerText = "Error loading data: " + e.message;
+            }
+        }
+
+        function render() {
+            const container = document.getElementById('content');
+            container.innerHTML = '';
+
+            // Group data
+            const groups = {};
+            const sortedKeys = Object.keys(currentData).sort();
+            
+            sortedKeys.forEach(key => {
+                const parts = key.split('.');
+                const groupName = parts.length > 1 ? parts[0] : 'General';
+                if (!groups[groupName]) groups[groupName] = [];
+                groups[groupName].push(key);
+            });
+
+            // Render groups
+            // Sort groups: General first, then alphabetical
+            const groupNames = Object.keys(groups).sort((a, b) => {
+                if (a === 'General') return -1;
+                if (b === 'General') return 1;
+                return a.localeCompare(b);
+            });
+
+            groupNames.forEach(gName => {
+                const keys = groups[gName];
+                
+                const details = document.createElement('details');
+                details.open = true;
+                details.className = 'group';
+                
+                const summary = document.createElement('summary');
+                summary.innerText = gName;
+                details.appendChild(summary);
+
+                const table = document.createElement('table');
+                keys.forEach(fullKey => {
+                    const val = currentData[fullKey];
+                    let displayKey = fullKey;
+                    if (gName !== 'General' && fullKey.startsWith(gName + '.')) {
+                        displayKey = fullKey.substring(gName.length + 1);
+                    }
+
+                    const tr = document.createElement('tr');
+                    tr.dataset.fullKey = fullKey;
+                    
+                    tr.innerHTML = `
+                        <td class="col-key">${displayKey}</td>
+                        <td class="col-val">${val}</td>
+                        <td class="col-act">
+                            <button onclick="enableEdit(this)">Edit</button>
+                        </td>
+                    `;
+                    table.appendChild(tr);
+                });
+                
+                details.appendChild(table);
+                container.appendChild(details);
+            });
+        }
+
+        function enableEdit(btn) {
+            const tr = btn.closest('tr');
+            const fullKey = tr.dataset.fullKey;
+            const val = currentData[fullKey];
+            
+            // Replace cells with inputs
+            const keyCell = tr.querySelector('.col-key');
+            const valCell = tr.querySelector('.col-val');
+            const actCell = tr.querySelector('.col-act');
+
+            // Create inputs safely
+            keyCell.innerHTML = '';
+            const keyInput = document.createElement('input');
+            keyInput.type = 'text';
+            keyInput.className = 'edit-key';
+            keyInput.value = fullKey;
+            keyInput.onchange = function() { handleEditChange(this); };
+            keyCell.appendChild(keyInput);
+
+            valCell.innerHTML = '';
+            const valInput = document.createElement('input');
+            valInput.type = 'text';
+            valInput.className = 'edit-val';
+            valInput.value = val !== undefined ? val : '';
+            valInput.onchange = function() { handleEditChange(this); };
+            valCell.appendChild(valInput);
+            
+            actCell.innerHTML = `
+                <button onclick="deleteField(this)" class="delete-btn">Delete</button>
+            `;
+        }
+
+        function handleEditChange(input) {
+            const tr = input.closest('tr');
+            const oldKey = tr.dataset.fullKey;
+            
+            const newKeyInput = tr.querySelector('.edit-key');
+            const newValInput = tr.querySelector('.edit-val');
+            
+            const newKey = newKeyInput.value.trim();
+            const newVal = newValInput.value;
+            
+            if (!newKey) return;
+
+            const newData = { ...currentData };
+            if (oldKey !== newKey) {
+                delete newData[oldKey];
+            }
+            newData[newKey] = newVal;
+            
+            // Update the row's key so subsequent edits work
+            tr.dataset.fullKey = newKey;
+            
+            performSave(newData);
+        }
+
+        function addNewField() {
+            const newKey = "new.field";
+            const newVal = "value";
+            
+            // Ensure unique key
+            let key = newKey;
+            let counter = 1;
+            while (currentData[key]) {
+                key = newKey + counter++;
+            }
+            
+            const newData = { ...currentData };
+            newData[key] = newVal;
+            
+            performSave(newData).then(() => {
+                render();
+                // Find the new row and enable edit
+                const rows = document.querySelectorAll('tr');
+                for (let row of rows) {
+                    if (row.dataset.fullKey === key) {
+                        const btn = row.querySelector('button');
+                        if (btn) enableEdit(btn);
+                        break;
+                    }
+                }
+            });
+        }
+
+        function deleteField(btn) {
+            if(!confirm("Delete this field?")) return;
+            const tr = btn.closest('tr');
+            const key = tr.dataset.fullKey;
+            
+            const newData = { ...currentData };
+            delete newData[key];
+            
+            performSave(newData).then(() => render());
+        }
+
+        async function performSave(newData, showSnack = true) {
+            const oldData = { ...currentData }; // Snapshot current state before update
+            
+            previousData = oldData;
+            currentData = newData; // Update local state
+            
+            try {
+                const res = await fetch(`/info/${currentId}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(newData)
+                });
+                
+                if (res.ok) {
+                    if (showSnack) showSnackbar();
+                } else {
+                    throw new Error("Server returned " + res.status);
+                }
+            } catch (e) {
+                alert("Failed to save: " + e.message);
+                currentData = oldData; // Revert
+                render(); // Re-render to show old data
+            }
+        }
+
+        async function revokeChanges() {
+            if (!previousData) return;
+            
+            const dataToRestore = previousData;
+            await performSave(dataToRestore, false);
+            render();
+            hideSnackbar();
+        }
+
+        function showSnackbar() {
+            const sb = document.getElementById("snackbar");
+            sb.className = "snackbar show";
+            clearTimeout(snackbarTimeout);
+            snackbarTimeout = setTimeout(() => { 
+                sb.className = sb.className.replace("show", ""); 
+            }, 5000);
+        }
+        
+        function hideSnackbar() {
+            const sb = document.getElementById("snackbar");
+            sb.className = "snackbar";
+        }
+
+        // Start
+        init();
+    </script>
+</body>
+</html>
