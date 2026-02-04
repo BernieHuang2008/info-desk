@@ -360,7 +360,7 @@
             // attach meta info
             newData["_meta.id"] = currentId; // Ensure ID is included
             newData["_meta.lastModified"] = new Date().toISOString();
-            newData["_meta.category"] = newData["meta.category"] || "general";
+            newData["_meta.category"] = newData["_meta.category"] || "general";
 
             try {
                 const res = await fetch(`/info/${currentId}`, {
