@@ -141,6 +141,16 @@
     </div>
 
     <script>
+        const templates = {
+            "book": {
+                "info.ISBN": "unset",
+                "info.author": "unset",
+                "info.publisher": "unset",
+                "info.pubdate": "unset",
+                "info.title": "unset"
+            }
+        }
+
         let currentId = null;
         let currentData = {};
         let previousData = null; // For revoke
@@ -361,6 +371,14 @@
             newData["_meta.id"] = currentId; // Ensure ID is included
             newData["_meta.lastModified"] = new Date().toISOString();
             newData["_meta.category"] = newData["_meta.category"] || "general";
+
+            if (newData["_meta.category"] in templates) {
+                // Apply template defaults
+                const template = templates[newData["_meta.category"]];
+                for (const [templateKey, defaultVal] of Object.entries(template)) {
+                    newData[templateKey] = newData[templateKey] || defaultVal;
+                }
+            }
 
             try {
                 const res = await fetch(`/info/${currentId}`, {
